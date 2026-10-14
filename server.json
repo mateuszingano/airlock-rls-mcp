@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.mateuszingano/airlock-rls-mcp",
+  "title": "Airlock RLS",
+  "description": "Scan a deployed site for an exposed Supabase service_role key and audit Row Level Security.",
+  "repository": {
+    "url": "https://github.com/mateuszingano/airlock-rls-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://shipsealed.com/?utm_source=mcp-registry&utm_medium=referral&utm_campaign=airlock-rls-mcp",
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "airlock-rls-mcp",
+      "version": "0.1.1",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}

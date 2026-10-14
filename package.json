@@ -1,7 +1,8 @@
 {
   "name": "airlock-rls-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for Airlock \u2014 let an AI coding agent (Cursor, Claude) scan a deployed site for an exposed Supabase service_role key and audit Row Level Security, mid-build. Catches the #1 vibe-coding leak.",
+  "version": "0.1.1",
+  "mcpName": "io.github.mateuszingano/airlock-rls-mcp",
+  "description": "MCP server for Airlock — let an AI coding agent (Cursor, Claude) scan a deployed site for an exposed Supabase service_role key and audit Row Level Security, mid-build. Catches the #1 vibe-coding leak.",
   "type": "module",
   "bin": {
     "airlock-rls-mcp": "index.mjs"
@@ -17,7 +18,8 @@
   "files": [
     "index.mjs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "server.json"
   ],
   "keywords": [
     "mcp",
@@ -42,7 +44,7 @@
     "type": "git",
     "url": "git+https://github.com/mateuszingano/airlock-rls-mcp.git"
   },
-  "homepage": "https://shipsealed.com",
+  "homepage": "https://shipsealed.com/?utm_source=npm&utm_medium=referral&utm_campaign=airlock-rls-mcp",
   "bugs": {
     "url": "https://github.com/mateuszingano/airlock-rls-mcp/issues"
   }

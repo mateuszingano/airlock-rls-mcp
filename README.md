@@ -44,7 +44,7 @@ npm run smoke   # starts the server and checks both tools are advertised
 
 ## More
 
-Guides on Supabase RLS, a live cross-tenant demo, and the hosted Airlock Monitor (continuous checks of your live database): [shipsealed.com](https://shipsealed.com)
+Guides on Supabase RLS, a live cross-tenant demo, and the hosted Airlock Monitor (continuous checks of your live database): [shipsealed.com](https://shipsealed.com/?utm_source=readme&utm_medium=referral&utm_campaign=airlock-rls-mcp)
 
 ## License
 

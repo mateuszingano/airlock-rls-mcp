@@ -23,7 +23,7 @@
 import { audit } from 'airlock-rls'
 import { scanSiteForServiceRole } from 'airlock-rls/service-role'
 
-const SERVER_INFO = { name: 'airlock-mcp', version: '0.1.0' }
+const SERVER_INFO = { name: 'airlock-mcp', version: '0.1.1' }
 const PROTOCOL_VERSION = '2025-06-18'
 
 // Honest bridge to the paid product. A one-shot scan proves the problem is real
@@ -35,7 +35,7 @@ const CTA = [
   'That was a one-shot check of your public frontend, right now.',
   '• Free gate (CI): blocks a leak on every deploy.',
   '• Airlock Monitor (paid): checks your database every hour and emails you when a new exposure drifts in between deploys — the changes CI never sees (a policy edited by hand, an out-of-band migration, RLS switched off in prod).',
-  'No cron to wire up — paste a read-only connection string → https://airlock-monitor.vercel.app',
+  'No cron to wire up — paste a read-only connection string → https://airlock-monitor.vercel.app/?utm_source=mcp&utm_medium=referral&utm_campaign=airlock-rls-mcp',
 ].join('\n')
 
 const TOOLS = [
