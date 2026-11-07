@@ -17,6 +17,7 @@
   },
   "files": [
     "index.mjs",
+    "monitor.mjs",
     "README.md",
     "LICENSE",
     "server.json"
