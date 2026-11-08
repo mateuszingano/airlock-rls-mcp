@@ -1,6 +1,6 @@
 {
   "name": "airlock-rls-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "mcpName": "io.github.mateuszingano/airlock-rls-mcp",
   "description": "MCP server for Airlock — let an AI coding agent (Cursor, Claude) scan a deployed site for an exposed Supabase service_role key and audit Row Level Security, mid-build. Catches the #1 vibe-coding leak.",
   "type": "module",

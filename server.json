@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://shipsealed.com/?utm_source=mcp-registry&utm_medium=referral&utm_campaign=airlock-rls-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "airlock-rls-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "transport": { "type": "stdio" }
     }
   ]
