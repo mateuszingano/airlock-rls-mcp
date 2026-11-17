@@ -8,9 +8,21 @@ The engine is [Airlock RLS](https://github.com/mateuszingano/airlock-rls) (`npm 
 
 ### Local (no account needed)
 
-**`scan_site_for_exposed_key`** — give it a deployed URL. It reads the page and its JS bundles for an exposed Supabase `service_role` key (a `service_role` JWT or an `sb_secret_...` key). No database, no credentials, just the public URL. A hit means anyone who reads it bypasses **every** RLS policy. It never prints the full key.
+**`scan_site_for_exposed_key`** — give it a deployed URL. It reads the page, its JS bundles and source maps for an exposed Supabase `service_role` key (a `service_role` JWT or an `sb_secret_...` key), and checks whether `/.env` is downloadable, `/.git/` is served or source maps are public. No database, no credentials, just the public URL. A key hit means anyone who reads it bypasses **every** RLS policy. It never prints a key or an `.env` value.
 
-**`audit_supabase_rls`** — give it a Postgres connection string. It fails on RLS-off tables, permissive (always-true) policies, and anon/authenticated tenant leaks. It reads **only** catalog metadata (`pg_tables`, `pg_policies`, grants), never your row data, so a read-only role is enough. Returns a human-readable summary.
+**`audit_supabase_rls`** — give it a Postgres connection string. It reads **only** catalog metadata, never your row data, so a read-only role is enough. Returns a human-readable summary. What it checks:
+
+- tables with RLS off, and policies that are always true (`USING (true)`, `auth.uid() = x OR 1=1`);
+- policies that don't tie rows to the caller, for reads, inserts, updates and deletes (tenant leaks);
+- policies that trust `user_metadata`, which every user can edit for themselves;
+- Storage: public buckets and the policies on `storage.objects`;
+- `SECURITY DEFINER` functions anon can call, or with no pinned `search_path`;
+- views that run as their owner and skip RLS, and exposed materialized views;
+- Realtime publications that stream anon-readable rows;
+- default privileges that hand every future table to the API roles (the post-Oct-30 "lazy fix");
+- roles with `BYPASSRLS`, and tables owned by a client role without `FORCE ROW LEVEL SECURITY`.
+
+Auth settings and Edge Functions code aren't in the database catalog, so they're out of scope.
 
 **`get_findings`** — same audit as `audit_supabase_rls`, but returns machine-readable structured JSON: findings grouped by severity, severity counts, table count, allowed (waived) findings, and stats. Built for agents that need to iterate over findings, generate fixes, or build reports programmatically.
 

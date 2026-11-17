@@ -9,13 +9,14 @@
 //
 //   1. scan_site_for_exposed_key — point it at a DEPLOYED URL. Reads the page
 //      and its JS bundles for a Supabase service_role key shipped to the
-//      browser. No database, no credentials. A hit means anyone can bypass
-//      every RLS policy. This is the #1 "vibe-coding" leak.
+//      browser, and checks for a downloadable .env, a public .git folder and
+//      public source maps. No database, no credentials. This is the #1
+//      "vibe-coding" leak.
 //
 //   2. audit_supabase_rls — point it at a Postgres/Supabase connection string.
-//      Fails on RLS-off tables, permissive (always-true) policies, and
-//      anon/authenticated tenant leaks. Reads only catalog metadata
-//      (pg_tables, pg_policies, grants) — never your row data.
+//      Tables, policies, storage, SECURITY DEFINER functions, views, realtime,
+//      default privileges and bypass roles. Reads only catalog metadata
+//      (pg_tables, pg_policies, grants, pg_proc…) — never your row data.
 //
 //   3. get_findings — like audit_supabase_rls but returns machine-readable
 //      structured JSON (severity counts, grouped findings) instead of a
@@ -32,11 +33,14 @@
 // The heavy lifting is the published Airlock engine (npm: airlock-rls). This file
 // is only the MCP wrapper.
 
+import { readFileSync } from 'node:fs'
 import { audit } from 'airlock-rls'
 import { scanSiteForServiceRole } from 'airlock-rls/service-role'
 import { MONITOR_TOOLS, callMonitorTool } from './monitor.mjs'
 
-const SERVER_INFO = { name: 'airlock-mcp', version: '0.1.1' }
+// Read the version from package.json so serverInfo never drifts from the release.
+const PKG = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+const SERVER_INFO = { name: 'airlock-mcp', version: PKG.version }
 const PROTOCOL_VERSION = '2025-06-18'
 
 // Honest bridge to the paid product. A one-shot scan proves the problem is real
@@ -55,13 +59,16 @@ const TOOLS = [
   {
     name: 'scan_site_for_exposed_key',
     description:
-      "Scan a DEPLOYED website's HTML and JavaScript bundles for an exposed " +
-      'Supabase service_role key (a service_role JWT or an sb_secret_... key). ' +
-      'Needs only the public URL — no database, no credentials. A found key is a ' +
-      'critical leak: it bypasses ALL Row Level Security, giving anyone who reads ' +
-      'it full read/write to the database. Use this right after deploying a ' +
-      'Supabase app, or whenever an AI-generated app might have bundled a secret ' +
-      'into the frontend. Never prints the full key.',
+      "Scan a DEPLOYED website's HTML, JavaScript bundles and source maps for an " +
+      'exposed Supabase service_role key (a service_role JWT or an sb_secret_... ' +
+      'key), and check whether /.env is downloadable (fail), /.git/ is served ' +
+      '(fail) or source maps are public (warn). Needs only the public URL: no ' +
+      'database, no credentials. A found service key bypasses ALL Row Level ' +
+      'Security, giving anyone full read/write to the database. Also reports ' +
+      'whether the public anon/publishable key is present, which means RLS is the ' +
+      'only lock (follow up with audit_supabase_rls). Use right after deploying a ' +
+      'Supabase app. Never prints a key or an .env value. Does not touch the ' +
+      'database; for that, use audit_supabase_rls.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -86,13 +93,21 @@ const TOOLS = [
   {
     name: 'audit_supabase_rls',
     description:
-      "Audit a Supabase/Postgres database's Row Level Security. Fails when a " +
-      'table has RLS disabled, when a policy is permissive (USING (true) / ' +
-      'WITH CHECK (true) or anything that reduces to always-true), when an anon ' +
-      'or authenticated policy does not scope rows to the caller (tenant leak), ' +
-      'and on exposed materialized views. Reads ONLY catalog metadata ' +
-      '(pg_tables, pg_policies, grants, functions, views) — never your row data. ' +
-      'A read-only connection string is enough.',
+      "Audit a Supabase/Postgres database's access control and return a " +
+      'human-readable report (use get_findings for JSON). Covers: tables with RLS ' +
+      'off; permissive policies (USING (true) or anything that reduces to ' +
+      'always-true); anon/authenticated policies that do not scope rows to the ' +
+      'caller (tenant leaks) for SELECT, INSERT, UPDATE and DELETE; policies that ' +
+      'trust user-editable user_metadata; Storage (public buckets and ' +
+      'storage.objects policies, reported as storage_<kind>); SECURITY DEFINER ' +
+      'functions (callable by anon, search_path not pinned, reading ' +
+      'user_metadata); views that run as their owner and skip RLS; exposed ' +
+      'materialized views; Realtime publications streaming anon-readable rows; ' +
+      'default privileges that grant future tables to the API roles; roles with ' +
+      'BYPASSRLS; and tables owned by a client role without FORCE RLS. Reads ONLY ' +
+      'catalog metadata, never row data, so a read-only role is enough; a check ' +
+      'the role cannot read is reported as check_skipped. Not covered: Auth ' +
+      'settings and Edge Functions code, which are not in the database catalog.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -127,7 +142,10 @@ const TOOLS = [
       'returns a human-readable summary), this tool returns findings grouped ' +
       'by severity with counts, suitable for programmatic consumption by an ' +
       'agent that needs to iterate over findings, generate fixes, or build a ' +
-      'report. Same engine, same checks, different output shape.',
+      'report. Same engine, same checks (tables, policies, Storage, SECURITY ' +
+      'DEFINER functions, views, Realtime, default privileges, roles), different ' +
+      'output shape. Each finding has kind, severity (fail/warn), object and ' +
+      'detail; pass kind to explain_finding or generate_fix.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -161,11 +179,14 @@ const TOOLS = [
       'audit_supabase_rls to understand a specific finding before fixing it. ' +
       'Supported kinds: rls_disabled, permissive_true, anon_unscoped, ' +
       'authenticated_unscoped, write_unchecked, write_unscoped, ' +
-      'update_using_unscoped, or_branch_unscoped, helper_scoped, ' +
-      'security_definer, anon_executes_definer, definer_search_path_mutable, ' +
-      'view_bypasses_rls, matview_exposed, public_bucket, realtime_exposure, ' +
-      'cross_tenant_read_leak, cross_tenant_write_leak, ' +
-      'cross_tenant_delete_leak, bypassrls_role, owner_bypasses_rls.',
+      'update_using_unscoped, delete_unscoped, or_branch_unscoped, helper_scoped, ' +
+      'policy_trusts_user_metadata, security_definer, anon_executes_definer, ' +
+      'definer_search_path_mutable, view_bypasses_rls, matview_exposed, ' +
+      'public_bucket, realtime_exposure, default_privileges_to_api_roles, ' +
+      'bypassrls_role, owner_bypasses_rls, cross_tenant_read_leak, ' +
+      'cross_tenant_write_leak, cross_tenant_delete_leak, service_role_exposed, ' +
+      'env_file_exposed, git_exposed, source_map_exposed, scan_truncated, plus ' +
+      'any storage_<kind> variant.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -244,14 +265,20 @@ async function handleScanSite(args) {
     throw new Error('site_url is required (a public https URL of the deployed site).')
   }
   const maxScripts = Number.isInteger(args?.max_scripts) ? args.max_scripts : 50
-  const { findings, scanned } = await scanSiteForServiceRole({ siteUrl, maxScripts })
+  const { findings, scanned, publicKeyFound = false } = await scanSiteForServiceRole({ siteUrl, maxScripts })
   const { fails } = summarize(findings)
-  const verdict = fails.length
-    ? `LEAK FOUND — a Supabase service_role key is exposed on ${siteUrl}. Rotate it now and move it server-side.`
-    : `Clean — no exposed service_role key found on ${siteUrl} (${scanned} document(s) scanned).`
+  const keyLeak = fails.some((f) => f.kind === 'service_role_exposed')
+  const verdict = keyLeak
+    ? `LEAK FOUND — a Supabase service key is exposed on ${siteUrl}. Rotate it now and move it server-side.`
+    : fails.length
+      ? `LEAK FOUND on ${siteUrl} — ${fails.map((f) => f.kind).join(', ')}. See below.`
+      : `Clean — no exposed service key, .env or .git found on ${siteUrl} (${scanned} document(s) scanned).`
+  const publicKeyNote = publicKeyFound
+    ? '\n\nThe site ships the public Supabase key (anon or sb_publishable_), as expected: RLS is now the only lock on your data. Run audit_supabase_rls to check it.'
+    : ''
   return {
-    content: [{ type: 'text', text: `${verdict}\n\n${renderFindings(findings)}\n\n${CTA}` }],
-    structuredContent: { site: siteUrl, scanned, leaked: fails.length > 0, findings },
+    content: [{ type: 'text', text: `${verdict}\n\n${renderFindings(findings)}${publicKeyNote}\n\n${CTA}` }],
+    structuredContent: { site: siteUrl, scanned, leaked: fails.length > 0, publicKeyFound, findings },
     isError: false,
   }
 }
@@ -593,6 +620,94 @@ const FINDING_KNOWLEDGE = {
       `ALTER TABLE "${schema}"."${table}" FORCE ROW LEVEL SECURITY;`,
     related: ['bypassrls_role', 'rls_disabled'],
   },
+  delete_unscoped: {
+    title: 'DELETE USING Not Scoped to Caller',
+    severity: 'fail',
+    what: 'A DELETE policy\'s USING clause does not tie the row to the caller. Any signed-in user (or anon) can delete rows that belong to someone else.',
+    why: 'Cross-tenant delete: one request can wipe other users\' data, and a delete cannot be undone from the client.',
+    fix: 'Scope the USING clause to the caller (auth.uid() or your tenant check).',
+    example_sql: (table, policy, schema) =>
+      (policy ? `DROP POLICY "${policy}" ON "${schema}"."${table}";\n\n` : '') +
+      `CREATE POLICY "${policy || 'delete_own'}" ON "${schema}"."${table}"\n` +
+      `  FOR DELETE TO authenticated\n` +
+      `  USING ((select auth.uid()) = user_id);`,
+    related: ['update_using_unscoped', 'cross_tenant_delete_leak'],
+  },
+  policy_trusts_user_metadata: {
+    title: 'Policy Trusts user_metadata',
+    severity: 'fail',
+    what: 'A policy (or a SECURITY DEFINER function the client can call) decides access from user_metadata: auth.jwt() -> \'user_metadata\' or auth.users.raw_user_meta_data.',
+    why: 'Every signed-in user can set their own user_metadata with supabase.auth.updateUser({ data: { ... } }). A role or tenant read from it is whatever the caller says it is, so anyone can make the policy pass.',
+    fix: 'Read the value from app_metadata (only the server can write it) or from a table users cannot write, such as a memberships table.',
+    example_sql: (table, policy, schema) =>
+      (policy ? `DROP POLICY "${policy}" ON "${schema}"."${table}";\n\n` : '') +
+      `-- app_metadata is set server-side (service key or an auth hook), never by the user:\n` +
+      `CREATE POLICY "${policy || 'tenant_read'}" ON "${schema}"."${table}"\n` +
+      `  FOR SELECT TO authenticated\n` +
+      `  USING (org_id = ((select auth.jwt()) -> 'app_metadata' ->> 'org_id')::uuid);`,
+    related: ['authenticated_unscoped', 'security_definer'],
+  },
+  default_privileges_to_api_roles: {
+    title: 'Default Privileges Grant Future Tables to the API',
+    severity: 'warn',
+    what: 'ALTER DEFAULT PRIVILEGES hands every table this owner creates from now on to anon, authenticated or PUBLIC.',
+    why: 'Nothing leaks today, but the next table created without RLS is readable with the public key the moment it exists. This is the common "lazy fix" for the 42501 errors after Supabase stopped granting new tables by default (Oct 30, 2026).',
+    fix: 'Revoke the default privileges and grant each new table explicitly in the migration that creates it, next to its RLS policies. Use the owner role named in the finding.',
+    example_sql: (_table, _policy, schema) =>
+      `-- Replace postgres with the owner role from the finding:\n` +
+      `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA "${schema}"\n` +
+      `  REVOKE ALL ON TABLES FROM anon, authenticated, PUBLIC;\n\n` +
+      `-- Then, per table, in the migration that creates it:\n` +
+      `-- GRANT SELECT, INSERT, UPDATE, DELETE ON "${schema}".your_table TO authenticated;`,
+    related: ['rls_disabled'],
+  },
+  service_role_exposed: {
+    title: 'Service Key Exposed in the Frontend',
+    severity: 'fail',
+    what: 'A Supabase service key (a service_role JWT or an sb_secret_... key) is in the site\'s HTML, JavaScript bundles or source maps.',
+    why: 'The service key bypasses every RLS policy. Anyone who opens the browser dev tools can read and write the whole database.',
+    fix: 'Rotate the key now in the Supabase dashboard (API Keys), then move every use of it to server-side code. The frontend only ever gets the publishable (or anon) key.',
+    example_sql: () =>
+      `-- No SQL fix. Rotate the key in the dashboard first: removing it from the\n` +
+      `-- code does not help, because the old bundle is already public and cached.`,
+    related: ['env_file_exposed', 'source_map_exposed'],
+  },
+  env_file_exposed: {
+    title: '.env File Downloadable',
+    severity: 'fail',
+    what: 'The site serves /.env. The finding counts the variables in it and never shows their values.',
+    why: 'Every secret in it (database URL, service key, API tokens) is public to anyone who requests the file.',
+    fix: 'Rotate every secret in that file, then stop shipping it: keep .env out of the public/static folder and the build output.',
+    example_sql: () => `-- No SQL fix. Rotate the secrets, then remove .env from what the host serves.`,
+    related: ['service_role_exposed', 'git_exposed'],
+  },
+  git_exposed: {
+    title: '.git Folder Served Publicly',
+    severity: 'fail',
+    what: 'The site serves /.git/. Anyone can download the source code and its full history.',
+    why: 'Secrets committed at any point in history are recoverable, along with server-side code that shows how to attack the app.',
+    fix: 'Stop deploying the .git folder (or block it on the host), and rotate any secret that was ever committed.',
+    example_sql: () => `-- No SQL fix. Remove .git from the deployed files and rotate committed secrets.`,
+    related: ['env_file_exposed', 'source_map_exposed'],
+  },
+  source_map_exposed: {
+    title: 'Public Source Maps',
+    severity: 'warn',
+    what: 'The site serves JavaScript source maps, which rebuild the original source code.',
+    why: 'Not a leak by itself, but it shows attackers the client logic, endpoints and anything embedded in the source. A key inside a source map is reported as service_role_exposed.',
+    fix: 'Turn off production browser source maps (Next.js: productionBrowserSourceMaps false; Vite: build.sourcemap false) or upload them privately to your error tracker.',
+    example_sql: () => `-- No SQL fix. Change the build config so .map files are not deployed.`,
+    related: ['service_role_exposed'],
+  },
+  scan_truncated: {
+    title: 'Site Scan Truncated',
+    severity: 'warn',
+    what: 'The site has more JavaScript bundles than the scan read, so some were not checked.',
+    why: 'A key in an unread bundle would be missed. The result is incomplete, not clean.',
+    fix: 'Run scan_site_for_exposed_key again with a higher max_scripts.',
+    example_sql: () => `-- No SQL fix. Re-run the scan with a higher max_scripts.`,
+    related: ['service_role_exposed'],
+  },
   nothing_audited: {
     title: 'Nothing Audited',
     severity: 'fail',
@@ -636,6 +751,15 @@ const FINDING_KNOWLEDGE = {
     fix: 'Qualify the allow entry, e.g. --allow "users.read_all".',
     example_sql: () => `-- No SQL fix — qualify the --allow entry in your config.`,
     related: ['allow_unused'],
+  },
+  allow_needs_namespace: {
+    title: 'Allow-List Entry Needs a Namespace',
+    severity: 'warn',
+    what: 'A bare allow entry would match a non-policy object (a bucket, view, function, role…). Nothing was waived.',
+    why: 'A bare name is ambiguous across object types, so the engine refuses to guess what you meant to waive.',
+    fix: 'Prefix the entry: storage:<bucket>, view:<name>, matview:<name>, fn:<name>, realtime:<table>, role:<name> or table:<name>.',
+    example_sql: () => `-- No SQL fix. Example: allow "storage:avatars" instead of "avatars".`,
+    related: ['allow_ambiguous', 'allow_unused'],
   },
 }
 
